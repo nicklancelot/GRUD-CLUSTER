@@ -1,0 +1,41 @@
+---
+# PodDisruptionBudget - Backend
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: mern-backend-pdb
+  namespace: mern-app
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: mern-backend
+  unhealthyPodEvictionPolicy: AlwaysAllow
+
+---
+# PodDisruptionBudget - Frontend
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: mern-frontend-pdb
+  namespace: mern-app
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: mern-frontend
+  unhealthyPodEvictionPolicy: AlwaysAllow
+
+---
+# PodDisruptionBudget - MongoDB
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: mongodb-pdb
+  namespace: mern-app
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: mongodb
+  unhealthyPodEvictionPolicy: AlwaysAllow

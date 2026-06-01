@@ -1,0 +1,88 @@
+---
+# Backend Service - ClusterIP
+apiVersion: v1
+kind: Service
+metadata:
+  name: mern-backend-service
+  namespace: mern-app
+  labels:
+    app: mern-backend
+    tier: backend
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+spec:
+  type: ClusterIP
+  selector:
+    app: mern-backend
+  ports:
+  - port: 5000
+    targetPort: 5000
+    protocol: TCP
+    name: http
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800
+
+---
+# Frontend Service - ClusterIP
+apiVersion: v1
+kind: Service
+metadata:
+  name: mern-frontend-service
+  namespace: mern-app
+  labels:
+    app: mern-frontend
+    tier: frontend
+spec:
+  type: ClusterIP
+  selector:
+    app: mern-frontend
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+
+---
+# Backend Service - LoadBalancer (optional, for external access)
+apiVersion: v1
+kind: Service
+metadata:
+  name: mern-backend-loadbalancer
+  namespace: mern-app
+  labels:
+    app: mern-backend
+spec:
+  type: LoadBalancer
+  selector:
+    app: mern-backend
+  ports:
+  - port: 5000
+    targetPort: 5000
+    protocol: TCP
+    name: http
+  sessionAffinity: ClientIP
+
+---
+# Frontend Service - LoadBalancer (optional, for external access)
+apiVersion: v1
+kind: Service
+metadata:
+  name: mern-frontend-loadbalancer
+  namespace: mern-app
+  labels:
+    app: mern-frontend
+spec:
+  type: LoadBalancer
+  selector:
+    app: mern-frontend
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  - port: 443
+    targetPort: 443
+    protocol: TCP
+    name: https

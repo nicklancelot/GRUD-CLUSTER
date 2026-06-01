@@ -1,0 +1,143 @@
+---
+# ServiceMonitor pour Prometheus (Promethée)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: mern-backend-monitor
+  namespace: mern-app
+  labels:
+    app: mern-backend
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: mern-backend
+  endpoints:
+  - port: http
+    interval: 30s
+    path: /metrics
+    scheme: http
+
+---
+# PrometheusRule para alertas
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: mern-app-alerts
+  namespace: mern-app
+  labels:
+    prometheus: kube-prometheus
+    role: alert-rules
+spec:
+  groups:
+  - name: mern-app.rules
+    interval: 30s
+    rules:
+    # Backend alerts
+    - alert: BackendDown
+      expr: up{job="mern-backend"} == 0
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Backend {{ $labels.pod }} is down"
+        description: "Backend pod {{ $labels.pod }} has been down for more than 5 minutes"
+    
+    - alert: BackendHighCPU
+      expr: rate(container_cpu_usage_seconds_total{pod=~"mern-backend-.*"}[5m]) > 0.8
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High CPU usage on backend"
+        description: "Backend pod {{ $labels.pod }} CPU usage is above 80%"
+    
+    - alert: BackendHighMemory
+      expr: container_memory_usage_bytes{pod=~"mern-backend-.*"} / container_spec_memory_limit_bytes > 0.85
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High memory usage on backend"
+        description: "Backend pod {{ $labels.pod }} memory usage is above 85%"
+    
+    # Frontend alerts
+    - alert: FrontendDown
+      expr: up{job="mern-frontend"} == 0
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Frontend {{ $labels.pod }} is down"
+        description: "Frontend pod {{ $labels.pod }} has been down for more than 5 minutes"
+    
+    # MongoDB alerts
+    - alert: MongoDBDown
+      expr: up{job="mongodb"} == 0
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "MongoDB {{ $labels.pod }} is down"
+        description: "MongoDB pod {{ $labels.pod }} is not responding"
+    
+    - alert: MongoDBReplicationIssue
+      expr: mongodb_replica_set_number_of_members != 3
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "MongoDB Replica Set issue"
+        description: "MongoDB replica set has {{ $value }} members, expected 3"
+    
+    - alert: MongoDBHighConnections
+      expr: mongodb_connections_current > 1000
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High MongoDB connections"
+        description: "MongoDB current connections: {{ $value }}"
+    
+    # Pod alerts
+    - alert: PodCrashLooping
+      expr: rate(kube_pod_container_status_restarts_total{namespace="mern-app"}[15m]) > 0.1
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Pod {{ $labels.pod }} is crash looping"
+        description: "Pod {{ $labels.pod }} is restarting more than expected"
+    
+    - alert: PodNotReady
+      expr: sum by (pod, namespace) (kube_pod_status_phase{namespace="mern-app",phase=~"Pending|Unknown|Failed"}) > 0
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Pod {{ $labels.pod }} is not ready"
+        description: "Pod {{ $labels.pod }} is in {{ $labels.phase }} state"
+
+---
+# PrometheusRule para recording rules
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: mern-app-recording-rules
+  namespace: mern-app
+spec:
+  groups:
+  - name: mern-app.recording_rules
+    interval: 15s
+    rules:
+    - record: instance:node_cpu:rate5m
+      expr: 100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+    
+    - record: instance:node_memory_utilisation:ratio
+      expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100
+    
+    - record: pod:container_memory_usage:sum
+      expr: sum by (pod, namespace) (container_memory_usage_bytes)
+    
+    - record: pod:container_cpu_usage:sum
+      expr: sum by (pod, namespace) (rate(container_cpu_usage_seconds_total[5m]))

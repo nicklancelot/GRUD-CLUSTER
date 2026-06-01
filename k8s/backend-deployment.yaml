@@ -1,0 +1,236 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mern-backend
+  namespace: mern-app
+  labels:
+    app: mern-backend
+    tier: backend
+    version: v1
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  
+  selector:
+    matchLabels:
+      app: mern-backend
+  
+  template:
+    metadata:
+      labels:
+        app: mern-backend
+        tier: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "5000"
+        prometheus.io/path: "/metrics"
+    
+    spec:
+      serviceAccountName: mern-backend-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      
+      affinity:
+        # Pod Anti-affinity para alta disponibilidad
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - mern-backend
+              topologyKey: "kubernetes.io/hostname"
+          - weight: 50
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - mern-backend
+              topologyKey: "topology.kubernetes.io/zone"
+        
+        # Pod affinity para estar cerca de MongoDB
+        podAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 50
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - mongodb
+              topologyKey: "topology.kubernetes.io/zone"
+      
+      terminationGracePeriodSeconds: 30
+      
+      imagePullSecrets:
+      - name: dockerhub-secret
+      
+      containers:
+      - name: backend
+        image: YOUR_DOCKERHUB_USERNAME/mern-backend:v1.0.0
+        imagePullPolicy: IfNotPresent
+        
+        ports:
+        - containerPort: 5000
+          name: http
+          protocol: TCP
+        
+        env:
+        - name: NODE_ENV
+          valueFrom:
+            configMapKeyRef:
+              name: mern-app-config
+              key: NODE_ENV
+        
+        - name: PORT
+          valueFrom:
+            configMapKeyRef:
+              name: backend-config
+              key: API_PORT
+        
+        - name: MONGO_URI
+          valueFrom:
+            secretKeyRef:
+              name: mern-db-secret
+              key: MONGO_URI
+        
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: mern-app-secrets
+              key: JWT_SECRET
+        
+        - name: FRONTEND_URL
+          valueFrom:
+            secretKeyRef:
+              name: mern-app-secrets
+              key: FRONTEND_URL
+        
+        - name: ADMIN_EMAIL
+          valueFrom:
+            secretKeyRef:
+              name: mern-app-secrets
+              key: ADMIN_EMAIL
+        
+        - name: ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mern-app-secrets
+              key: ADMIN_PASSWORD
+        
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+            - ALL
+        
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+            ephemeral-storage: "100Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+            ephemeral-storage: "500Mi"
+        
+        # Health checks
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 5000
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 3
+          timeoutSeconds: 5
+        
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 5000
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          failureThreshold: 3
+          timeoutSeconds: 3
+        
+        startupProbe:
+          httpGet:
+            path: /api/health
+            port: 5000
+            scheme: HTTP
+          initialDelaySeconds: 0
+          periodSeconds: 10
+          failureThreshold: 30
+          timeoutSeconds: 5
+        
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: cache
+          mountPath: /app/.cache
+      
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: cache
+        emptyDir: {}
+      
+      # Politica de tolerancia a fallos
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app: mern-backend
+
+---
+# Service Account
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mern-backend-sa
+  namespace: mern-app
+
+---
+# Role
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mern-backend-role
+  namespace: mern-app
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+
+---
+# RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mern-backend-rolebinding
+  namespace: mern-app
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: mern-backend-role
+subjects:
+- kind: ServiceAccount
+  name: mern-backend-sa
+  namespace: mern-app

@@ -1,0 +1,106 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+metadata:
+  name: mern-app
+
+namespace: mern-app
+
+# Bases
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secrets.yaml
+  - mongodb-statefulset.yaml
+  - backend-deployment.yaml
+  - frontend-deployment.yaml
+  - services.yaml
+  - ingress.yaml
+  - hpa.yaml
+  - pdb.yaml
+  - monitoring.yaml
+  - logging.yaml
+
+# Common labels applied to all resources
+commonLabels:
+  app: mern
+  environment: production
+
+# Images configuration
+images:
+  - name: YOUR_DOCKERHUB_USERNAME/mern-backend
+    newTag: v1.0.0
+  - name: YOUR_DOCKERHUB_USERNAME/mern-frontend
+    newTag: v1.0.0
+
+# Common annotations
+commonAnnotations:
+  managed-by: "kustomize"
+  app.kubernetes.io/name: "mern-app"
+  app.kubernetes.io/version: "1.0.0"
+
+# Replicas configuration
+replicas:
+  - name: mern-backend
+    count: 3
+  - name: mern-frontend
+    count: 3
+
+# Patch resources
+patchesStrategicMerge:
+  - |-
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: mern-backend
+    spec:
+      template:
+        spec:
+          containers:
+          - name: backend
+            resources:
+              requests:
+                memory: 256Mi
+                cpu: 200m
+              limits:
+                memory: 512Mi
+                cpu: 500m
+
+# Patch image
+patchesJson6902:
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: mern-backend
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: YOUR_DOCKERHUB_USERNAME/mern-backend:v1.0.0
+
+# ConfigMaps and Secrets
+configMapGenerator:
+  - name: app-config
+    files:
+      - configmap.yaml
+
+secretGenerator:
+  - name: app-secrets
+    files:
+      - secrets.yaml
+
+# Vars for cross-resource references
+vars:
+  - name: BACKEND_SERVICE
+    objref:
+      kind: Service
+      name: mern-backend-service
+      apiVersion: v1
+    fieldref:
+      fieldpath: metadata.name
+  - name: FRONTEND_SERVICE
+    objref:
+      kind: Service
+      name: mern-frontend-service
+      apiVersion: v1
+    fieldref:
+      fieldpath: metadata.name

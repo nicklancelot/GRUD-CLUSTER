@@ -1,0 +1,97 @@
+apiVersion: skaffold/v4beta6
+kind: Config
+metadata:
+  name: mern-grid-cluster
+
+build:
+  artifacts:
+  - image: YOUR_DOCKERHUB_USERNAME/mern-backend
+    docker:
+      dockerfile: Dockerfile
+      target: production
+    context: ../backend
+    sync:
+      manual:
+      - src: src/**/*.js
+        dest: /usr/src/app/src
+  - image: YOUR_DOCKERHUB_USERNAME/mern-frontend
+    docker:
+      dockerfile: Dockerfile
+    context: ../frontend
+    sync:
+      manual:
+      - src: src/**/*.jsx
+        dest: /usr/src/app/src
+      - src: index.html
+        dest: /usr/src/app/
+
+deploy:
+  kubectl:
+    defaultNamespace: mern-app
+  manifests:
+    rawYaml:
+    - namespace.yaml
+    - configmap.yaml
+    - secrets.yaml
+    - mongodb-statefulset.yaml
+    - backend-deployment.yaml
+    - frontend-deployment.yaml
+    - services.yaml
+    - ingress.yaml
+    - hpa.yaml
+    - pdb.yaml
+    - monitoring.yaml
+    - logging.yaml
+
+portForward:
+- resourceType: deployment
+  resourceName: mern-backend
+  port: 5000
+  localPort: 5000
+  namespace: mern-app
+- resourceType: deployment
+  resourceName: mern-frontend
+  port: 80
+  localPort: 3000
+  namespace: mern-app
+
+profiles:
+# Development profile
+- name: dev
+  activation:
+  - command: dev
+  build:
+    local:
+      push: false
+  deploy:
+    kubectl: {}
+  portForward:
+  - resourceType: deployment
+    resourceName: mern-backend
+    port: 5000
+    localPort: 5000
+    namespace: mern-app
+  - resourceType: deployment
+    resourceName: mern-frontend
+    port: 80
+    localPort: 3000
+    namespace: mern-app
+
+# Production profile
+- name: prod
+  activation:
+  - command: run
+  build:
+    googleCloudBuild: {}
+  deploy:
+    kubectl: {}
+
+# Testing profile
+- name: test
+  activation:
+  - command: debug
+  build:
+    local:
+      push: true
+  deploy:
+    kubectl: {}

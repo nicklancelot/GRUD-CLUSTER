@@ -1,20 +1,18 @@
-# Image Node
-FROM node:20
-
-# Dossier de travail
-WORKDIR /app
-
-# Copier package.json
+# Étape 1 : Build et dépendances de développement
+FROM node:20-alpine AS builder
+WORKDIR /usr/src/app
 COPY package*.json ./
-
-# Installer dépendances
-RUN npm install
-
-# Copier le reste
+RUN npm ci
 COPY . .
 
-# Port du backend
+# Étape 2 : Exécution de production
+FROM node:20-alpine
+WORKDIR /usr/src/app
+ENV NODE_ENV=production
+COPY package*.json ./
+RUN npm ci --only=production
+COPY --from=builder /usr/src/app ./
+# Sécurisation : Utilisation de l'utilisateur non-root natif d'Alpine
+USER node
 EXPOSE 5000
-
-# Lancer le serveur
-CMD ["npm", "start"]
+CMD ["node", "server.js"]

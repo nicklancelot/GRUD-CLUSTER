@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mern-backend-deployment
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: mern-backend
+  template:
+    metadata:
+      labels:
+        app: mern-backend
+    spec:
+      imagePullSecrets:
+      - name: dockerhub-secret
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - mern-backend
+            topologyKey: "kubernetes.io/hostname"
+      containers:
+      - name: backend-container
+        image: votre_pseudo_dockerhub/mern-backend:v1.0.0
+        ports:
+        - containerPort: 5000
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        readinessProbe:
+          httpGet:
+            path: /api/health # Assurez-vous d'avoir une route de test /api/health dans votre code Express
+            port: 5000
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 5000
+          initialDelaySeconds: 20
+          periodSeconds: 15
+        env:
+        - name: MONGO_URI
+          valueFrom:
+            secretKeyRef:
+              name: mern-database-secret
+              key: MONGO_URI
+        envFrom:
+        - configMapRef:
+            name: mern-configmap
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mern-backend-service
+spec:
+  type: ClusterIP
+  ports:
+  - port: 5000
+    targetPort: 5000
+  selector:
+    app: mern-backend

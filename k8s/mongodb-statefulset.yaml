@@ -1,0 +1,208 @@
+---
+# MongoDB StatefulSet avec persistance et réplication
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongodb
+  namespace: mern-app
+  labels:
+    app: mongodb
+    tier: database
+spec:
+  serviceName: mongodb-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: mongodb
+  template:
+    metadata:
+      labels:
+        app: mongodb
+        tier: database
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - mongodb
+            topologyKey: "kubernetes.io/hostname"
+      
+      terminationGracePeriodSeconds: 30
+      
+      containers:
+      - name: mongodb
+        image: mongo:7.0.6
+        imagePullPolicy: IfNotPresent
+        
+        ports:
+        - containerPort: 27017
+          name: mongo-port
+          protocol: TCP
+        
+        env:
+        - name: MONGO_INITDB_ROOT_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: mern-db-secret
+              key: MONGO_USER
+        - name: MONGO_INITDB_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mern-db-secret
+              key: MONGO_PASSWORD
+        - name: MONGO_INITDB_DATABASE
+          valueFrom:
+            configMapKeyRef:
+              name: mern-db-secret
+              key: MONGO_DB
+        
+        # MongoDB Replica Set Configuration
+        command:
+          - mongod
+          - "--replSet=rs0"
+          - "--bind_ip=0.0.0.0"
+          - "--auth"
+          - "--keyFile=/etc/mongodb-keyfile/keyfile"
+          - "--dbpath=/data/db"
+        
+        volumeMounts:
+        - name: data
+          mountPath: /data/db
+        - name: config
+          mountPath: /config
+          readOnly: true
+        - name: keyfile
+          mountPath: /etc/mongodb-keyfile
+          readOnly: true
+        
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "1000m"
+            memory: "2Gi"
+        
+        livenessProbe:
+          exec:
+            command:
+            - /bin/bash
+            - -c
+            - "mongo -u $MONGO_INITDB_ROOT_USERNAME -p $MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase admin --eval \"rs.status()\" || exit 1"
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          failureThreshold: 3
+          timeoutSeconds: 5
+        
+        readinessProbe:
+          exec:
+            command:
+            - /bin/bash
+            - -c
+            - "mongo -u $MONGO_INITDB_ROOT_USERNAME -p $MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase admin --eval \"rs.status()\" | grep -c PRIMARY"
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 3
+          timeoutSeconds: 5
+      
+      # Init container pour initialiser le Replica Set
+      initContainers:
+      - name: mongodb-init
+        image: mongo:7.0.6
+        command:
+          - /bin/bash
+          - -c
+          - |
+            if [ "$HOSTNAME" = "mongodb-0" ]; then
+              until mongo --host mongodb-0.mongodb-headless.mern-app.svc.cluster.local --eval "rs.status()" 2>/dev/null; do
+                sleep 2
+              done
+              mongo --host mongodb-0.mongodb-headless.mern-app.svc.cluster.local <<EOF
+              rs.initiate({
+                _id: "rs0",
+                members: [
+                  { _id: 0, host: "mongodb-0.mongodb-headless.mern-app.svc.cluster.local:27017" },
+                  { _id: 1, host: "mongodb-1.mongodb-headless.mern-app.svc.cluster.local:27017" },
+                  { _id: 2, host: "mongodb-2.mongodb-headless.mern-app.svc.cluster.local:27017" }
+                ]
+              })
+              EOF
+            fi
+        volumeMounts:
+        - name: data
+          mountPath: /data/db
+      
+      volumes:
+      - name: config
+        configMap:
+          name: mongodb-init-script
+      - name: keyfile
+        secret:
+          secretName: mongodb-keyfile
+          defaultMode: 0400
+
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+      labels:
+        app: mongodb
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: "standard"
+      resources:
+        requests:
+          storage: 10Gi
+
+---
+# Headless Service para MongoDB Replica Set
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb-headless
+  namespace: mern-app
+  labels:
+    app: mongodb
+spec:
+  serviceName: mongodb-headless
+  clusterIP: None
+  ports:
+  - port: 27017
+    targetPort: 27017
+    name: mongo-port
+  selector:
+    app: mongodb
+
+---
+# ClusterIP Service para MongoDB
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+  namespace: mern-app
+  labels:
+    app: mongodb
+spec:
+  type: ClusterIP
+  ports:
+  - port: 27017
+    targetPort: 27017
+    protocol: TCP
+    name: mongo-port
+  selector:
+    app: mongodb
+
+---
+# Secret para MongoDB Keyfile (pour Replica Set authentication)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mongodb-keyfile
+  namespace: mern-app
+type: Opaque
+data:
+  # Clé de réplication MongoDB encodée en base64
+  keyfile: QW9YZW1LaTc3UEFsSUtZMjBsQkJVVzQzR2Q1SGh0SHpJQ2d1YktGbWwwOGFHSWJjSGVRN2d4TjBwMQ==
